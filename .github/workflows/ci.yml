@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: 校验（语法 / 元数据 / 离线自测 / 密钥 / 个人路径）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: 语法检查（ESM 源，排除 lib/ 产物）
+        shell: bash
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            if ! node --check "$f" 2>/dev/null; then
+              echo "::error file=$f::语法检查失败"
+              fail=1
+            fi
+          done < <(find . -type f \( -name '*.js' -o -name '*.mjs' \) \
+                     -not -path './node_modules/*' -not -path './lib/*')
+          # 产物也要能解析
+          node --check lib/client.js
+          exit $fail
+
+      - name: package.json 元数据
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const missing = ["name", "version", "description", "license"].filter(k => !p[k]);
+            if (missing.length) { console.error("缺少字段:", missing.join(", ")); process.exit(1); }
+            if (/[^\x00-\x7F]/.test(p.name)) { console.error("包名必须是 ASCII"); process.exit(1); }
+            if (!p.dsh || !p.dsh.bundle || !p.dsh.bundle.patch) { console.error("缺少 dsh.bundle.patch"); process.exit(1); }
+            if (!p.dsh.client || p.dsh.client.platform !== "web") { console.error("缺少 dsh.client.platform=web"); process.exit(1); }
+            console.log("ok:", p.name + "@" + p.version);
+          '
+          node -e 'JSON.parse(require("fs").readFileSync("package.json","utf8")); console.log("package.json 合法")'
+
+      - name: 离线自测（黑盒打三条路由）
+        run: node verify/host-test.mjs
+
+      - name: 密钥扫描（只报位置，不回显内容）
+        shell: bash
+        run: |
+          if grep -rnE 'sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+               --include='*.md' --include='*.js' --include='*.mjs' --include='*.json' --include='*.yml' . ; then
+            echo "::error::出现疑似凭证特征"
+            exit 1
+          fi
+          echo "密钥扫描干净 ✅"
+
+      - name: 个人绝对路径检查
+        shell: bash
+        run: |
+          if grep -rnE 'D:\\+Users|/Users/[a-z]|C:\\+Users' \
+               --include='*.md' --include='*.js' --include='*.mjs' --include='*.yml' . ; then
+            echo "::error::文档/代码里出现个人绝对路径，请改成 \$DSH_HOME 之类的占位符"
+            exit 1
+          fi
+          echo "未发现个人绝对路径 ✅"

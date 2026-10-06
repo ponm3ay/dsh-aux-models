@@ -1,0 +1,13 @@
+# dsh-aux-models bundle 层：把这个包装进 profile 的 dsh.profile.bundles 时，
+# 自动往加载器插一行（id: aux-models-panel），profile 不必手改 cordis.patch.yml。
+#
+# 装法二选一，**never both**（两条同 id 会被 client-modules 表拒绝）：
+#   A. bundle：profile package.json 的 dsh.profile.bundles 加 "dsh-aux-models" + pnpm install
+#   B. profile patch 行：往 profile 的 cordis.patch.yml 追加
+#        - insert: [{ id: aux-models-panel, name: dsh-aux-models }]
+#
+# profile 层想禁用：把 id: aux-models-panel 那行 disabled: true。
+
+- insert:
+    - id: aux-models-panel
+      name: dsh-aux-models
